@@ -3800,31 +3800,31 @@ export default function RemodelProApp({ user, profile, supabase, onSignOut }) {
       <div className="mob-bn" style={{position:"fixed",bottom:0,left:0,right:0,height:56,zIndex:80,background:"var(--c1)",borderTop:"1px solid var(--bd)",alignItems:"center",justifyContent:"space-evenly",padding:"4px 0 2px"}}>
         <div onClick={()=>{setView("projects");setABuild(null);closeMob()}} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2,cursor:"pointer",padding:"2px 6px",borderRadius:6,background:view==="projects"?"var(--ad)":"transparent",color:view==="projects"?"var(--a2)":"var(--t2)",minWidth:44}}>
           <I name="users" size={18}/><span style={{fontSize:7,fontWeight:600}}>Customers</span></div>
-        <div onClick={()=>{setView("pricebook");setPbCat(null);setPbSub(null);setPbSearch("");closeMob()}} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2,cursor:"pointer",padding:"2px 6px",borderRadius:6,background:view==="pricebook"?"var(--ad)":"transparent",color:view==="pricebook"?"var(--a2)":"var(--t2)",minWidth:44}}>
-          <I name="package" size={18}/><span style={{fontSize:7,fontWeight:600}}>Pricebook</span></div>
+        {isAdmin&&<div onClick={()=>{setView("pricebook");setPbCat(null);setPbSub(null);setPbSearch("");closeMob()}} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2,cursor:"pointer",padding:"2px 6px",borderRadius:6,background:view==="pricebook"?"var(--ad)":"transparent",color:view==="pricebook"?"var(--a2)":"var(--t2)",minWidth:44}}>
+          <I name="package" size={18}/><span style={{fontSize:7,fontWeight:600}}>Pricebook</span></div>}
         {view==="projects"&&aProj&&cur.p?<>
           <div onClick={()=>setPreview("con")} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2,cursor:"pointer",padding:"2px 6px",borderRadius:6,color:"var(--gd)",minWidth:36}}>
             <I name="file" size={16}/><span style={{fontSize:6,fontWeight:600}}>Contract</span></div>
-          <div onClick={()=>{if(confirm("Click to confirm processing the order")){sendToGHL("Approved Order")}}} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2,cursor:"pointer",padding:"2px 6px",borderRadius:6,background:"var(--ac)",color:"#fff",minWidth:36,opacity:sending?.5:1}}>
-            <I name="checkCircle" size={16}/><span style={{fontSize:6,fontWeight:700}}>{sending?"...":"Approve"}</span></div>
-          <div onClick={()=>setActionModal("noDemo")} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2,cursor:"pointer",padding:"2px 6px",borderRadius:6,color:"var(--er)",minWidth:36}}>
-            <I name="x" size={16}/><span style={{fontSize:6,fontWeight:600}}>No Demo</span></div>
-          <div onClick={()=>setActionModal("pitchMiss")} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2,cursor:"pointer",padding:"2px 6px",borderRadius:6,color:"var(--wn)",minWidth:36}}>
-            <I name="alertTri" size={16}/><span style={{fontSize:6,fontWeight:600}}>Miss</span></div>
+          {!cur.p.locked&&<div onClick={()=>{if(confirm("Click to confirm processing the order")){sendToGHL("Approved Order")}}} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2,cursor:"pointer",padding:"2px 6px",borderRadius:6,background:"var(--ac)",color:"#fff",minWidth:36,opacity:sending?.5:1}}>
+            <I name="checkCircle" size={16}/><span style={{fontSize:6,fontWeight:700}}>{sending?"...":"Approve"}</span></div>}
+          {!cur.p.locked&&<div onClick={()=>setActionModal("noDemo")} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2,cursor:"pointer",padding:"2px 6px",borderRadius:6,color:"var(--er)",minWidth:36}}>
+            <I name="x" size={16}/><span style={{fontSize:6,fontWeight:600}}>No Demo</span></div>}
+          {!cur.p.locked&&<div onClick={()=>setActionModal("pitchMiss")} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2,cursor:"pointer",padding:"2px 6px",borderRadius:6,color:"var(--wn)",minWidth:36}}>
+            <I name="alertTri" size={16}/><span style={{fontSize:6,fontWeight:600}}>Miss</span></div>}
           <div onClick={()=>{setChangeOrder({buildId:"",items:[],chargeable:true});setActionModal("changeOrder")}} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2,cursor:"pointer",padding:"2px 6px",borderRadius:6,color:"var(--ok)",minWidth:36}}>
             <I name="checkCircle" size={16}/><span style={{fontSize:6,fontWeight:600}}>Change</span></div>
-        </>:<div onClick={()=>{setView("ghl");closeMob()}} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2,cursor:"pointer",padding:"2px 6px",borderRadius:6,background:view==="ghl"?"var(--ad)":"transparent",color:view==="ghl"?"var(--a2)":"var(--t2)",minWidth:44}}>
-          <I name="zap" size={18}/><span style={{fontSize:7,fontWeight:600}}>Settings</span></div>}
+        </>:isAdmin?<div onClick={()=>{setView("ghl");closeMob()}} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2,cursor:"pointer",padding:"2px 6px",borderRadius:6,background:view==="ghl"?"var(--ad)":"transparent",color:view==="ghl"?"var(--a2)":"var(--t2)",minWidth:44}}>
+          <I name="zap" size={18}/><span style={{fontSize:7,fontWeight:600}}>Settings</span></div>:null}
       </div>
       <div className={"sb"+(mobileMenu?" open":"")}><div className="sb-h"><div className="sb-logo">Remodel<span>Pro</span></div><div className="sb-sub">{profile?.full_name||user?.email||"Pricebook & Estimating"} <span style={{opacity:.3}}>v3.0</span></div></div>
         <div className="sb-n">
           <div className="sb-s"><div className="sb-l">Workspace</div>
             <div className={"ni"+(view==="projects"?" a":"")} onClick={()=>{setView("projects");setABuild(null);closeMob()}}><I name="users" size={13}/> Customers <span className="bg">{customers.length}</span></div>
-            <div className={"ni"+(view==="pricebook"?" a":"")} onClick={()=>{setView("pricebook");setPbCat(null);setPbSub(null);setPbSearch("");closeMob()}}><I name="package" size={13}/> Pricebook <span className="bg">{allProducts.length}</span></div></div>
-          <div className="sb-s"><div className="sb-l">Integrations</div>
+            {isAdmin&&<div className={"ni"+(view==="pricebook"?" a":"")} onClick={()=>{setView("pricebook");setPbCat(null);setPbSub(null);setPbSearch("");closeMob()}}><I name="package" size={13}/> Pricebook <span className="bg">{allProducts.length}</span></div>}</div>
+          {isAdmin&&<div className="sb-s"><div className="sb-l">Admin</div>
             <div className={"ni"+(view==="ghl"?" a":"")} onClick={()=>{setView("ghl");closeMob()}}><I name="zap" size={13}/> Integrations {ghl.webhookUrl&&<span className="bg" style={{background:"var(--od)",color:"var(--ok)"}}>ON</span>}</div>
             <div className={"ni"+(view==="admin"?" a":"")} onClick={()=>{setView("admin");closeMob()}}><I name="file" size={13}/> Admin</div>
-            {isAdmin&&<div className={"ni"+(view==="reports"?" a":"")} onClick={()=>{setView("reports");closeMob()}}><I name="zap" size={13}/> Reports</div>}</div>
+            <div className={"ni"+(view==="reports"?" a":"")} onClick={()=>{setView("reports");closeMob()}}><I name="zap" size={13}/> Reports</div></div>}
           {onSignOut&&<div className="sb-s"><div className="ni" onClick={onSignOut} style={{color:"var(--er)"}}><I name="x" size={13}/> Sign Out</div></div>}
           {customers.length>0&&<div className="sb-s"><div className="sb-l">Recent</div>
             {customers.slice(0,5).map(c=><div key={c.id} className={"ni"+(aCust===c.id&&view==="projects"?" a":"")} onClick={()=>{setView("projects");setACust(c.id);setAProj(null);setABuild(null);closeMob()}}><I name="home" size={11}/><span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.name}</span></div>)}</div>}
