@@ -608,7 +608,7 @@ export default function RemodelProApp({ user, profile, supabase, onSignOut }) {
               const { data: projs } = await supabase.from('projects').select('*').eq('customer_id', c.id);
               const projects = await Promise.all((projs||[]).map(async p => {
                 const { data: blds } = await supabase.from('builds').select('*').eq('project_id', p.id);
-                return { ...p, orderedAt: p.ordered_at||"", jobDate: p.job_date||"", locked: p.locked||false, builds: (blds||[]).map(b => ({...b, payTerms: b.pay_terms, payType: b.pay_terms?.payType||"", finType: b.pay_terms?.finType||"", wizConfig: b.wiz_config, wizStep: b.wiz_config?.wizStep, wizSelections: b.wiz_selections})) };
+                return { ...p, orderedAt: p.ordered_at||"", jobDate: p.job_date||"", locked: p.locked||false, result: p.result||"", resultDate: p.result_date||"", noDemoReason: p.no_demo_reason||"", laborCost: p.labor_cost||0, builds: (blds||[]).map(b => ({...b, payTerms: b.pay_terms, payType: b.pay_terms?.payType||"", finType: b.pay_terms?.finType||"", wizConfig: b.wiz_config, wizStep: b.wiz_config?.wizStep, wizSelections: b.wiz_selections})) };
               }));
               return { ...c, projects };
             }));
@@ -689,6 +689,10 @@ export default function RemodelProApp({ user, profile, supabase, onSignOut }) {
         ordered_at: projObj.orderedAt || null,
         job_date: projObj.jobDate || null,
         locked: projObj.locked || false,
+        result: projObj.result || null,
+        result_date: projObj.resultDate || null,
+        no_demo_reason: projObj.noDemoReason || null,
+        labor_cost: projObj.laborCost || 0,
         updated_at: new Date().toISOString()
       }).eq('id', projObj.id);
     } catch(e) { console.error('Sync project error:', e); }
@@ -1458,12 +1462,14 @@ export default function RemodelProApp({ user, profile, supabase, onSignOut }) {
         // Record orderedAt date on first approval and persist immediately
         if (isApprove && cur.p) {
           const orderDate = cur.p.orderedAt || new Date().toISOString();
-          updC(cs=>cs.map(c=>c.id!==aCust?c:{...c,projects:c.projects.map(p=>p.id!==aProj?p:{...p,orderedAt:orderDate,status:"sent",locked:true})}));
+          updC(cs=>cs.map(c=>c.id!==aCust?c:{...c,projects:c.projects.map(p=>p.id!==aProj?p:{...p,orderedAt:orderDate,status:"sent",locked:true,result:"Sold",resultDate:orderDate})}));
           if (supabase) {
             try { await supabase.from('projects').update({
               status:'sent', 
               locked: true,
               ordered_at: orderDate,
+              result: 'Sold',
+              result_date: orderDate,
               discounts: cur.p.discounts || [],
               job_date: cur.p.jobDate || null,
               updated_at: new Date().toISOString()
@@ -2669,6 +2675,268 @@ export default function RemodelProApp({ user, profile, supabase, onSignOut }) {
   };
 
   /* ── PROJECTS ── */
+  /* ── REPORTS ── */
+  const [rptTab, setRptTab] = useState("overview"); // overview, reps, costs, ranking
+  const [rptPeriod, setRptPeriod] = useState(30); // 7 or 30
+
+  const renderReports = () => {
+    // Gather all projects with results across all customers
+    const allProjs = [];
+    customers.forEach(c => {
+      (c.projects||[]).forEach(p => {
+        allProjs.push({...p, customerName: c.name, customerEmail: c.email, repId: c.created_by||"", repEmail: c.created_by_email||"Unassigned"});
+      });
+    });
+
+    const now = new Date();
+    const cutoff = new Date(now.getTime() - rptPeriod * 24*60*60*1000).toISOString();
+    const cutoff24h = new Date(now.getTime() - 24*60*60*1000).toISOString();
+
+    const resulted = allProjs.filter(p => p.result);
+    const inPeriod = resulted.filter(p => p.resultDate >= cutoff);
+    const sold = inPeriod.filter(p => p.result === "Sold");
+    const pitchMiss = inPeriod.filter(p => p.result === "Pitch Miss");
+    const noDemo = inPeriod.filter(p => p.result === "No Demo");
+
+    // Unresulted: no result, created more than 24h ago
+    const unresulted = allProjs.filter(p => !p.result);
+    const parked = unresulted.filter(p => {
+      const created = p.orderedAt || p.jobDate || "";
+      return created && created >= cutoff24h;
+    });
+    const unassigned = unresulted.filter(p => {
+      const created = p.orderedAt || p.jobDate || "";
+      return !created || created < cutoff24h;
+    });
+
+    // Default labor cost from admin setting
+    const defaultLabor = parseFloat(localStorage.getItem("default_labor_cost")||"0")||0;
+
+    // Rep breakdown
+    const reps = {};
+    inPeriod.forEach(p => {
+      const email = p.repEmail||"Unassigned";
+      if (!reps[email]) reps[email] = {email, sold:[], pitchMiss:[], noDemo:[], changeOrders:0, builds:{}};
+      if (p.result==="Sold") reps[email].sold.push(p);
+      if (p.result==="Pitch Miss") reps[email].pitchMiss.push(p);
+      if (p.result==="No Demo") reps[email].noDemo.push(p);
+    });
+
+    // Build type breakdown per rep
+    Object.values(reps).forEach(r => {
+      [...r.sold,...r.pitchMiss].forEach(p => {
+        (p.builds||[]).forEach(b => {
+          const bt = b.type||"Unknown";
+          if (!r.builds[bt]) r.builds[bt] = {sold:0, pitchMiss:0, points:0};
+          if (p.result==="Sold") { r.builds[bt].sold++; r.builds[bt].points++; }
+          if (p.result==="Pitch Miss") {
+            r.builds[bt].pitchMiss++;
+            // Check if pitch miss was above bottom
+            const cm = calcBuildCommission(b, p);
+            if (!cm.belowBottom) r.builds[bt].points--; // loses point if above bottom
+          }
+        });
+      });
+    });
+
+    // Cost report for sold jobs
+    const costReport = sold.map(p => {
+      const retail = pRetail(p);
+      const soldAmt = pSold(p);
+      const totalCost = (p.builds||[]).reduce((s,b) => {
+        const items = (b.items||[]).reduce((s2,l) => s2 + (l.cost||0)*(l.qty||1), 0);
+        const extras = (b.extras||[]).reduce((s2,x) => {
+          const prod = allProducts.find(pp=>pp.id===x.productId);
+          return s2 + (prod?(prod.cost||0):0)*(x.qty||1);
+        }, 0);
+        return s + items + extras;
+      }, 0);
+      const labor = p.laborCost || defaultLabor;
+      const totalJobCost = totalCost + labor;
+      const profit = soldAmt - totalJobCost;
+      const profitPct = soldAmt > 0 ? (profit / soldAmt * 100) : 0;
+      return {...p, retail, soldAmt, totalCost, labor, totalJobCost, profit, profitPct};
+    });
+
+    return (<>
+      <div className="tb"><div className="tb-t"><I name="zap" size={14}/> Reports</div></div>
+      <div className="ct" style={{maxWidth:900}}>
+        <div style={{display:"flex",gap:4,marginBottom:8,flexWrap:"wrap"}}>
+          {["overview","reps","costs","ranking"].map(t => <button key={t} className={"btn"+(rptTab===t?" bp":"")} onClick={()=>setRptTab(t)} style={{fontSize:11}}>
+            {t==="overview"?"Overview":t==="reps"?"Rep Performance":t==="costs"?"Job Costs":"Rankings"}</button>)}
+          <div style={{marginLeft:"auto",display:"flex",gap:2}}>
+            <button className={"btn bs"+(rptPeriod===7?" bp":"")} onClick={()=>setRptPeriod(7)} style={{fontSize:10}}>7 Days</button>
+            <button className={"btn bs"+(rptPeriod===30?" bp":"")} onClick={()=>setRptPeriod(30)} style={{fontSize:10}}>30 Days</button>
+          </div>
+        </div>
+
+        {rptTab==="overview"&&<>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))",gap:8,marginBottom:16}}>
+            <div className="cd" style={{textAlign:"center",padding:12}}><div style={{fontSize:22,fontWeight:700,color:"var(--ok)"}}>{sold.length}</div><div style={{fontSize:9,color:"var(--t2)"}}>Sold</div></div>
+            <div className="cd" style={{textAlign:"center",padding:12}}><div style={{fontSize:22,fontWeight:700,color:"var(--er)"}}>{pitchMiss.length}</div><div style={{fontSize:9,color:"var(--t2)"}}>Pitch Miss</div></div>
+            <div className="cd" style={{textAlign:"center",padding:12}}><div style={{fontSize:22,fontWeight:700,color:"var(--wn)"}}>{noDemo.length}</div><div style={{fontSize:9,color:"var(--t2)"}}>No Demo</div></div>
+            <div className="cd" style={{textAlign:"center",padding:12}}><div style={{fontSize:22,fontWeight:700,color:"var(--a2)"}}>{sold.length+pitchMiss.length>0?Math.round(sold.length/(sold.length+pitchMiss.length)*100):0}%</div><div style={{fontSize:9,color:"var(--t2)"}}>Close Rate</div></div>
+            <div className="cd" style={{textAlign:"center",padding:12}}><div style={{fontSize:22,fontWeight:700,color:"var(--t2)"}}>{parked.length}</div><div style={{fontSize:9,color:"var(--t2)"}}>Parked (&lt;24h)</div></div>
+            <div className="cd" style={{textAlign:"center",padding:12}}><div style={{fontSize:22,fontWeight:700,color:"var(--wn)"}}>{unassigned.length}</div><div style={{fontSize:9,color:"var(--t2)"}}>Unresulted</div></div>
+          </div>
+          <div className="cd" style={{marginBottom:12}}>
+            <div className="cd-t" style={{marginBottom:6}}>Avg Sold Amount</div>
+            <div className="nm" style={{fontSize:18,fontWeight:700,color:"var(--ok)"}}>{sold.length>0?fmt(sold.reduce((s,p)=>s+pSold(p),0)/sold.length):"—"}</div>
+          </div>
+          <div className="cd" style={{marginBottom:12}}>
+            <div className="cd-t" style={{marginBottom:6}}>Avg Pitch Miss Amount</div>
+            <div className="nm" style={{fontSize:18,fontWeight:700,color:"var(--er)"}}>{pitchMiss.length>0?fmt(pitchMiss.reduce((s,p)=>s+pSold(p),0)/pitchMiss.length):"—"}</div>
+          </div>
+          <div className="cd" style={{marginBottom:12}}>
+            <div className="cd-t" style={{marginBottom:6}}>Default Labor Cost</div>
+            <div style={{display:"flex",alignItems:"center",gap:6}}>
+              <input className="inp is" type="number" step="0.01" value={defaultLabor||""} onChange={e=>{try{localStorage.setItem("default_labor_cost",e.target.value)}catch(er){}}} style={{width:120}} placeholder="0.00"/>
+              <span style={{fontSize:9,color:"var(--t2)"}}>Applied to all sold jobs without individual labor cost</span>
+            </div>
+          </div>
+        </>}
+
+        {rptTab==="reps"&&<>
+          {Object.values(reps).sort((a,b)=>b.sold.length-a.sold.length).map(r => {
+            const totalJobs = r.sold.length + r.pitchMiss.length;
+            const closeRate = totalJobs > 0 ? Math.round(r.sold.length / totalJobs * 100) : 0;
+            const avgSold = r.sold.length > 0 ? r.sold.reduce((s,p)=>s+pSold(p),0)/r.sold.length : 0;
+            const avgPM = r.pitchMiss.length > 0 ? r.pitchMiss.reduce((s,p)=>s+pSold(p),0)/r.pitchMiss.length : 0;
+
+            return <div key={r.email} className="cd" style={{marginBottom:12}}>
+              <div className="cd-h"><div className="cd-t">{r.email}</div>
+                <div style={{display:"flex",gap:6}}>
+                  <span className="tg tok">{r.sold.length} sold</span>
+                  <span className="tg ter">{r.pitchMiss.length} PM</span>
+                  <span className="tg tw">{r.noDemo.length} ND</span>
+                </div></div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8,marginTop:8,fontSize:10}}>
+                <div><div style={{color:"var(--t3)",fontSize:8,textTransform:"uppercase"}}>Close Rate</div><div style={{fontWeight:700,color:closeRate>=20?"var(--ok)":"var(--er)"}}>{closeRate}%</div></div>
+                <div><div style={{color:"var(--t3)",fontSize:8,textTransform:"uppercase"}}>Avg Sold</div><div className="nm" style={{fontWeight:600}}>{avgSold>0?fmt(avgSold):"—"}</div></div>
+                <div><div style={{color:"var(--t3)",fontSize:8,textTransform:"uppercase"}}>Avg Pitch Miss</div><div className="nm" style={{fontWeight:600,color:"var(--er)"}}>{avgPM>0?fmt(avgPM):"—"}</div></div>
+                <div><div style={{color:"var(--t3)",fontSize:8,textTransform:"uppercase"}}>Total Jobs</div><div style={{fontWeight:600}}>{r.sold.length+r.pitchMiss.length+r.noDemo.length}</div></div>
+              </div>
+
+              {/* Build type breakdown */}
+              {Object.keys(r.builds).length>0&&<div style={{marginTop:8,paddingTop:8,borderTop:"1px solid var(--bd)"}}>
+                <div style={{fontSize:9,fontWeight:600,color:"var(--t3)",marginBottom:4}}>By Build Type</div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))",gap:4}}>
+                  {Object.entries(r.builds).map(([bt,d])=>{
+                    const cr = d.sold+d.pitchMiss>0?Math.round(d.sold/(d.sold+d.pitchMiss)*100):0;
+                    return <div key={bt} style={{padding:"4px 6px",background:"var(--ci)",borderRadius:4,fontSize:9}}>
+                      <div style={{fontWeight:600}}>{bt}</div>
+                      <div>Sold: {d.sold} | PM: {d.pitchMiss} | CR: {cr}%</div>
+                    </div>;
+                  })}
+                </div>
+              </div>}
+
+              {/* No Demo reasons */}
+              {r.noDemo.length>0&&<div style={{marginTop:6,paddingTop:6,borderTop:"1px solid var(--bd)"}}>
+                <div style={{fontSize:9,fontWeight:600,color:"var(--t3)",marginBottom:2}}>No Demo Reasons</div>
+                {Object.entries(r.noDemo.reduce((acc,p)=>{const reason=p.noDemoReason||"Unknown";acc[reason]=(acc[reason]||0)+1;return acc},{})).map(([reason,count])=>
+                  <div key={reason} style={{fontSize:9,display:"flex",justifyContent:"space-between"}}><span>{reason}</span><span style={{fontWeight:600}}>{count}</span></div>
+                )}
+              </div>}
+
+              {/* Pitch miss analysis */}
+              {r.pitchMiss.length>0&&<div style={{marginTop:6,paddingTop:6,borderTop:"1px solid var(--bd)"}}>
+                <div style={{fontSize:9,fontWeight:600,color:"var(--t3)",marginBottom:2}}>Pitch Miss Analysis</div>
+                {r.pitchMiss.map(p => {
+                  const retail = pRetail(p);
+                  const pmAmt = pSold(p);
+                  const bottomTotal = (p.builds||[]).reduce((s,b)=>{const cm=calcBuildCommission(b,p);return s+cm.bottomPrice},0);
+                  const pctOfBottom = bottomTotal>0?Math.round(pmAmt/bottomTotal*100):0;
+                  return <div key={p.id} style={{fontSize:9,padding:"2px 0",display:"flex",justifyContent:"space-between"}}>
+                    <span>{p.customerName} — {p.name}</span>
+                    <span className="nm">{fmt(pmAmt)} <span style={{color:pmAmt>=bottomTotal?"var(--ok)":"var(--er)"}}>({pctOfBottom}% of bottom)</span></span>
+                  </div>;
+                })}
+              </div>}
+            </div>;
+          })}
+          {Object.keys(reps).length===0&&<div className="em"><I name="users" size={32}/><p>No resulted jobs in this period</p></div>}
+        </>}
+
+        {rptTab==="costs"&&<>
+          <div className="cd" style={{marginBottom:12,border:"1px solid rgba(212,164,74,.2)",background:"rgba(212,164,74,.04)"}}>
+            <div style={{fontSize:11,color:"var(--t2)"}}>Job cost report for {sold.length} sold jobs. Set labor cost per project or use the default labor cost from the Overview tab.</div>
+          </div>
+          {costReport.map(cr => <div key={cr.id} className="cd" style={{marginBottom:8}}>
+            <div className="cd-h"><div style={{fontSize:11,fontWeight:600}}>{cr.customerName} — {cr.name}</div>
+              <span style={{fontSize:10,color:"var(--t2)"}}>{cr.repEmail}</span></div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr 1fr",gap:6,marginTop:6,fontSize:10}}>
+              <div><div style={{color:"var(--t3)",fontSize:8,textTransform:"uppercase"}}>Sold</div><div className="nm" style={{fontWeight:600}}>{fmt(cr.soldAmt)}</div></div>
+              <div><div style={{color:"var(--t3)",fontSize:8,textTransform:"uppercase"}}>Material Cost</div><div className="nm" style={{fontWeight:600}}>{fmt(cr.totalCost)}</div></div>
+              <div><div style={{color:"var(--t3)",fontSize:8,textTransform:"uppercase"}}>Labor</div>
+                <DInput className="inp is" type="number" step="0.01" value={cr.laborCost||cr.labor||""} onChange={v=>{
+                  updC(cs=>cs.map(c=>({...c,projects:(c.projects||[]).map(p=>p.id===cr.id?{...p,laborCost:v}:p)})));
+                }} style={{width:80,fontSize:10}}/></div>
+              <div><div style={{color:"var(--t3)",fontSize:8,textTransform:"uppercase"}}>Total Cost</div><div className="nm" style={{fontWeight:600}}>{fmt(cr.totalJobCost)}</div></div>
+              <div><div style={{color:"var(--t3)",fontSize:8,textTransform:"uppercase"}}>Profit</div><div className="nm" style={{fontWeight:700,color:cr.profit>0?"var(--ok)":"var(--er)"}}>{fmt(cr.profit)} ({cr.profitPct.toFixed(1)}%)</div></div>
+            </div>
+          </div>)}
+          {costReport.length>0&&<div className="cd" style={{border:"1px solid var(--ok)",background:"rgba(45,212,160,.04)"}}>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr 1fr",gap:6,fontSize:11,fontWeight:700}}>
+              <div>Total Sold: {fmt(costReport.reduce((s,c)=>s+c.soldAmt,0))}</div>
+              <div>Materials: {fmt(costReport.reduce((s,c)=>s+c.totalCost,0))}</div>
+              <div>Labor: {fmt(costReport.reduce((s,c)=>s+c.labor,0))}</div>
+              <div>Cost: {fmt(costReport.reduce((s,c)=>s+c.totalJobCost,0))}</div>
+              <div style={{color:"var(--ok)"}}>Profit: {fmt(costReport.reduce((s,c)=>s+c.profit,0))}</div>
+            </div>
+          </div>}
+        </>}
+
+        {rptTab==="ranking"&&<>
+          <div className="cd" style={{marginBottom:12,border:"1px solid rgba(59,109,240,.2)",background:"rgba(59,109,240,.04)"}}>
+            <div style={{fontSize:11,color:"var(--t2)"}}>Points: +1 per sold job. -1 per pitch miss above bottom. Close rate below 20% over 7 days loses a point. Ranked by build type.</div>
+          </div>
+          {(()=>{
+            // Calculate points per rep per build type
+            const rankings = {};
+            Object.entries(reps).forEach(([email, r]) => {
+              Object.entries(r.builds).forEach(([bt, d]) => {
+                if (!rankings[bt]) rankings[bt] = [];
+                let points = d.points;
+                // Check 7-day close rate penalty
+                const last7 = new Date(now.getTime()-7*24*60*60*1000).toISOString();
+                const r7sold = r.sold.filter(p=>p.resultDate>=last7&&(p.builds||[]).some(b=>b.type===bt)).length;
+                const r7pm = r.pitchMiss.filter(p=>p.resultDate>=last7&&(p.builds||[]).some(b=>b.type===bt)).length;
+                const r7cr = r7sold+r7pm>0?r7sold/(r7sold+r7pm)*100:100;
+                if (r7cr < 20 && (r7sold+r7pm)>0) points--;
+                rankings[bt].push({email:r.email, sold:d.sold, pitchMiss:d.pitchMiss, points, closeRate:d.sold+d.pitchMiss>0?Math.round(d.sold/(d.sold+d.pitchMiss)*100):0, cr7:Math.round(r7cr)});
+              });
+            });
+
+            return Object.entries(rankings).sort().map(([bt, reps2]) => <div key={bt} className="cd" style={{marginBottom:12}}>
+              <div className="cd-t" style={{marginBottom:8}}>{bt}</div>
+              <table style={{fontSize:10}}><thead><tr>
+                <th style={{textAlign:"left"}}>Rank</th>
+                <th style={{textAlign:"left"}}>Rep</th>
+                <th style={{textAlign:"center"}}>Sold</th>
+                <th style={{textAlign:"center"}}>PM</th>
+                <th style={{textAlign:"center"}}>CR%</th>
+                <th style={{textAlign:"center"}}>7d CR%</th>
+                <th style={{textAlign:"center"}}>Points</th>
+              </tr></thead><tbody>
+                {reps2.sort((a,b)=>b.points-a.points).map((r2,i)=><tr key={r2.email}>
+                  <td style={{fontWeight:700,color:i===0?"var(--gd)":i===1?"var(--t2)":"var(--t3)"}}>{i+1}</td>
+                  <td>{r2.email}</td>
+                  <td style={{textAlign:"center",color:"var(--ok)"}}>{r2.sold}</td>
+                  <td style={{textAlign:"center",color:"var(--er)"}}>{r2.pitchMiss}</td>
+                  <td style={{textAlign:"center"}}>{r2.closeRate}%</td>
+                  <td style={{textAlign:"center",color:r2.cr7<20?"var(--er)":"var(--ok)"}}>{r2.cr7}%</td>
+                  <td style={{textAlign:"center",fontWeight:700,color:r2.points>0?"var(--ok)":r2.points<0?"var(--er)":"var(--t2)"}}>{r2.points}</td>
+                </tr>)}
+              </tbody></table>
+            </div>);
+          })()}
+        </>}
+
+      </div>
+    </>);
+  };
+
   const renderProj = () => (<>
     <div className="tb"><div className="tb-t">{aCust&&cur.c?aProj&&cur.p?(cur.c.name+" / "+cur.p.name):cur.c.name:"Customers & Projects"}</div>
       <div className="tb-a">
@@ -2969,7 +3237,12 @@ export default function RemodelProApp({ user, profile, supabase, onSignOut }) {
         </select></div>
       <div style={{display:"flex",justifyContent:"flex-end",gap:6,marginTop:12}}>
         <button className="btn" onClick={()=>setActionModal(null)}>Cancel</button>
-        <button className="btn bp" disabled={!noDemoReason||sending} style={{opacity:noDemoReason&&!sending?1:.4}} onClick={async()=>{await sendToGHL("No Demo");setActionModal(null);setNoDemoReason("")}}>
+        <button className="btn bp" disabled={!noDemoReason||sending} style={{opacity:noDemoReason&&!sending?1:.4}} onClick={async()=>{
+          // Persist result
+          const now = new Date().toISOString();
+          updC(cs=>cs.map(c=>c.id!==aCust?c:{...c,projects:c.projects.map(p=>p.id!==aProj?p:{...p,result:"No Demo",resultDate:now,noDemoReason})}));
+          if(supabase){try{await supabase.from('projects').update({result:'No Demo',result_date:now,no_demo_reason:noDemoReason,status:'no_demo'}).eq('id',cur.p.id)}catch(e){}}
+          await sendToGHL("No Demo");setActionModal(null);setNoDemoReason("")}}>
           {sending?"Processing...":"Process No Demo"}</button>
       </div>
     </div></div>}
@@ -2992,7 +3265,11 @@ export default function RemodelProApp({ user, profile, supabase, onSignOut }) {
       </div>
       <div style={{display:"flex",justifyContent:"flex-end",gap:6}}>
         <button className="btn" onClick={()=>setActionModal(null)}>Cancel</button>
-        <button className="btn" style={{background:"var(--er)",borderColor:"var(--er)",color:"#fff"}} disabled={sending} onClick={async()=>{await sendToGHL("Pitch Miss");setActionModal(null)}}>
+        <button className="btn" style={{background:"var(--er)",borderColor:"var(--er)",color:"#fff"}} disabled={sending} onClick={async()=>{
+          const now = new Date().toISOString();
+          updC(cs=>cs.map(c=>c.id!==aCust?c:{...c,projects:c.projects.map(p=>p.id!==aProj?p:{...p,result:"Pitch Miss",resultDate:now})}));
+          if(supabase){try{await supabase.from('projects').update({result:'Pitch Miss',result_date:now,status:'pitch_miss'}).eq('id',cur.p.id)}catch(e){}}
+          await sendToGHL("Pitch Miss");setActionModal(null)}}>
           {sending?"Processing...":"Process Pitch Miss"}</button>
       </div>
     </div></div>}
@@ -3524,7 +3801,8 @@ export default function RemodelProApp({ user, profile, supabase, onSignOut }) {
             <div className={"ni"+(view==="pricebook"?" a":"")} onClick={()=>{setView("pricebook");setPbCat(null);setPbSub(null);setPbSearch("");closeMob()}}><I name="package" size={13}/> Pricebook <span className="bg">{allProducts.length}</span></div></div>
           <div className="sb-s"><div className="sb-l">Integrations</div>
             <div className={"ni"+(view==="ghl"?" a":"")} onClick={()=>{setView("ghl");closeMob()}}><I name="zap" size={13}/> Integrations {ghl.webhookUrl&&<span className="bg" style={{background:"var(--od)",color:"var(--ok)"}}>ON</span>}</div>
-            <div className={"ni"+(view==="admin"?" a":"")} onClick={()=>{setView("admin");closeMob()}}><I name="file" size={13}/> Admin</div></div>
+            <div className={"ni"+(view==="admin"?" a":"")} onClick={()=>{setView("admin");closeMob()}}><I name="file" size={13}/> Admin</div>
+            {isAdmin&&<div className={"ni"+(view==="reports"?" a":"")} onClick={()=>{setView("reports");closeMob()}}><I name="zap" size={13}/> Reports</div>}</div>
           {onSignOut&&<div className="sb-s"><div className="ni" onClick={onSignOut} style={{color:"var(--er)"}}><I name="x" size={13}/> Sign Out</div></div>}
           {customers.length>0&&<div className="sb-s"><div className="sb-l">Recent</div>
             {customers.slice(0,5).map(c=><div key={c.id} className={"ni"+(aCust===c.id&&view==="projects"?" a":"")} onClick={()=>{setView("projects");setACust(c.id);setAProj(null);setABuild(null);closeMob()}}><I name="home" size={11}/><span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.name}</span></div>)}</div>}
@@ -3535,6 +3813,7 @@ export default function RemodelProApp({ user, profile, supabase, onSignOut }) {
         {view==="wizard"&&renderWiz()}
         {view==="ghl"&&renderGHL()}
         {view==="admin"&&renderAdmin()}
+        {view==="reports"&&renderReports()}
       </div>
     </div>
     {modal==="cust"&&<div className="mo" onClick={()=>setModal(null)}><div className="ml" onClick={e=>e.stopPropagation()}>
