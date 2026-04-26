@@ -1698,6 +1698,7 @@ export default function RemodelProApp({ user, profile, supabase, onSignOut }) {
       }
     };
     const updExtra = (id, field, val) => onUpdate(items.map(x => x.id === id ? {...x, [field]: val} : x));
+    const updExtraMulti = (id, updates) => onUpdate(items.map(x => x.id === id ? {...x, ...updates} : x));
     const rmExtra = (id) => onUpdate(items.filter(x => x.id !== id));
 
     return (<div className="cd" style={{border:"1px solid rgba(245,166,35,.2)",background:"rgba(245,166,35,.03)"}}>
@@ -1765,8 +1766,7 @@ export default function RemodelProApp({ user, profile, supabase, onSignOut }) {
                     <div style={{display:"flex",alignItems:"center",gap:4,flexShrink:0}}>
                       <span className="nm" style={{fontSize:9,color:"var(--t2)"}}>{p.price>0?fmt(p.price):"Incl."}</span>
                       <button className={"btn bs "+(isSel?"bo":"bp")} style={{fontSize:8,padding:"2px 6px"}} onClick={()=>{
-                        updExtra(x.id,"linkedProductId",p.id);
-                        updExtra(x.id,"linkedProductName",p.name);
+                        updExtraMulti(x.id, {linkedProductId: p.id, linkedProductName: p.name});
                       }}>{isSel?"Selected":"Select"}</button>
                     </div>
                   </div>;
