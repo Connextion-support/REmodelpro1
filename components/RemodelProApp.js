@@ -1711,19 +1711,67 @@ export default function RemodelProApp({ user, profile, supabase, onSignOut }) {
             </div>
             <button className="bg2" style={{color:"var(--er)",flexShrink:0,marginLeft:6}} onClick={()=>rmExtra(x.id)}><I name="trash" size={11}/></button>
           </div>
-          {linkedCat&&linkedProds.length>0&&<div className="ig" style={{marginTop:4,marginBottom:4}}>
-            <label style={{color:"var(--ok)"}}>{linkedCat.label}</label>
-            <select className="inp is" value={x.linkedProductId||""} onChange={e=>{
-              const lp = linkedProds.find(p=>p.id===e.target.value);
-              if(lp) updExtra(x.id,"linkedProductId",lp.id);
-              if(lp) updExtra(x.id,"linkedProductName",lp.name);
-            }}>
-              <option value="">Select product...</option>
-              {linkedProds.filter(p=>{const u=p.name.toUpperCase();return !(u.includes("- NONE")||u.endsWith("NONE")||u.includes(", NONE")||u.includes("- NA,")||u.endsWith(", NA")||u.endsWith("- NA"));}).map(p=>
-                <option key={p.id} value={p.id}>{p.name} — {p.price>0?fmt(p.price):"Included"}</option>)}
-            </select>
-            {x.linkedProductName&&<div style={{fontSize:9,color:"var(--ok)",marginTop:2}}>Selected: {x.linkedProductName}</div>}
-          </div>}
+          {linkedCat&&linkedProds.length>0&&(()=>{
+            // Filterable linked product picker with cascading filters
+            const real = linkedProds.filter(p => {
+              const u = p.name.toUpperCase();
+              return !(u.includes("- NONE")||u.endsWith("NONE")||u.includes(", NONE")||u.includes("- NA,")||u.endsWith(", NA")||u.endsWith("- NA"));
+            });
+            const extFilters = x.extFilters || {};
+            const f1Label = real.find(p=>p.f1l)?.f1l||"";
+            const f2Label = real.find(p=>p.f2l)?.f2l||"";
+            const f3Label = real.find(p=>p.f3l)?.f3l||"";
+            const f1Opts = f1Label ? [...new Set(real.filter(p=>p.f1v).map(p=>p.f1v))].sort() : [];
+            let after1 = real; if(extFilters.f1) after1 = real.filter(p=>p.f1v===extFilters.f1);
+            const f2Opts = f2Label ? [...new Set(after1.filter(p=>p.f2v).map(p=>p.f2v))].sort() : [];
+            let after2 = after1; if(extFilters.f2&&f2Label) after2 = after1.filter(p=>p.f2v===extFilters.f2);
+            const f3Opts = f3Label ? [...new Set(after2.filter(p=>p.f3v).map(p=>p.f3v))].sort() : [];
+            let filtered = after2; if(extFilters.f3&&f3Label) filtered = after2.filter(p=>p.f3v===extFilters.f3);
+            // Search within filtered
+            const srch = extFilters.search||"";
+            if(srch) filtered = filtered.filter(p=>p.name.toLowerCase().includes(srch.toLowerCase()));
+            const setEF = (field,val) => {
+              const next = {...extFilters, [field]:val};
+              if(field==="f1"){next.f2="";next.f3="";}
+              if(field==="f2"){next.f3="";}
+              updExtra(x.id,"extFilters",next);
+            };
+            const hasFilters = f1Label && f1Opts.length > 1;
+
+            return <div style={{marginTop:4,marginBottom:4,padding:"6px 8px",background:"rgba(45,212,160,.04)",border:"1px solid rgba(45,212,160,.15)",borderRadius:"var(--r)"}}>
+              <div style={{fontSize:10,fontWeight:600,color:"var(--ok)",marginBottom:4}}>{linkedCat.label}</div>
+              {hasFilters&&<div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:4}}>
+                {f1Label&&f1Opts.length>1&&<select className="inp is" style={{flex:1,minWidth:100,fontSize:11}} value={extFilters.f1||""} onChange={e=>setEF("f1",e.target.value)}>
+                  <option value="">All {f1Label}s ({f1Opts.length})</option>
+                  {f1Opts.map(o=><option key={o} value={o}>{o}</option>)}</select>}
+                {f2Label&&f2Opts.length>1&&<select className="inp is" style={{flex:1,minWidth:100,fontSize:11}} value={extFilters.f2||""} onChange={e=>setEF("f2",e.target.value)}>
+                  <option value="">All {f2Label}s ({f2Opts.length})</option>
+                  {f2Opts.map(o=><option key={o} value={o}>{o}</option>)}</select>}
+                {f3Label&&f3Opts.length>1&&<select className="inp is" style={{flex:1,minWidth:100,fontSize:11}} value={extFilters.f3||""} onChange={e=>setEF("f3",e.target.value)}>
+                  <option value="">All {f3Label}s ({f3Opts.length})</option>
+                  {f3Opts.map(o=><option key={o} value={o}>{o}</option>)}</select>}
+                {(extFilters.f1||extFilters.f2||extFilters.f3)&&<button className="bg2" style={{fontSize:9,color:"var(--a2)"}} onClick={()=>updExtra(x.id,"extFilters",{})}>Clear</button>}
+              </div>}
+              <input className="inp is" placeholder={"Search "+linkedCat.label.replace("Select ","")+"..."} value={srch} onChange={e=>setEF("search",e.target.value)} style={{marginBottom:4,fontSize:11}}/>
+              <div style={{fontSize:9,color:"var(--t3)",marginBottom:2}}>{filtered.length} products</div>
+              <div style={{maxHeight:160,overflowY:"auto"}}>
+                {filtered.map(p=>{
+                  const isSel = x.linkedProductId===p.id;
+                  return <div key={p.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"3px 0",borderBottom:"1px solid var(--bd)",background:isSel?"rgba(45,212,160,.08)":"transparent"}}>
+                    <div style={{flex:1,minWidth:0,fontSize:10,fontWeight:isSel?600:400,wordBreak:"break-word"}}>{p.name}</div>
+                    <div style={{display:"flex",alignItems:"center",gap:4,flexShrink:0}}>
+                      <span className="nm" style={{fontSize:9,color:"var(--t2)"}}>{p.price>0?fmt(p.price):"Incl."}</span>
+                      <button className={"btn bs "+(isSel?"bo":"bp")} style={{fontSize:8,padding:"2px 6px"}} onClick={()=>{
+                        updExtra(x.id,"linkedProductId",p.id);
+                        updExtra(x.id,"linkedProductName",p.name);
+                      }}>{isSel?"Selected":"Select"}</button>
+                    </div>
+                  </div>;
+                })}
+              </div>
+              {x.linkedProductName&&<div style={{fontSize:9,color:"var(--ok)",marginTop:3,fontWeight:600}}>Selected: {x.linkedProductName}</div>}
+            </div>;
+          })()}
           <div style={{display:"flex",alignItems:"center",gap:6,marginTop:4}}>
             <div style={{display:"flex",alignItems:"center",gap:2}}>
               <button className="bg2" onClick={()=>updExtra(x.id,"qty",Math.max(1,(x.qty||1)-1))} style={{fontSize:14,padding:"0 4px",lineHeight:1}}>-</button>
