@@ -599,9 +599,14 @@ export default function RemodelProApp({ user, profile, supabase, onSignOut }) {
         try {
           const { data: custs } = await supabase.from('customers').select('*').order('created_at', { ascending: false });
           if (custs) {
-            // Build unique user list for admin view
+            // Build unique user list from customers AND profiles table
             const users = {};
             custs.forEach(c => { if(c.created_by_email) users[c.created_by||"unknown"] = c.created_by_email; });
+            // Also try loading from profiles table for complete user list
+            try {
+              const { data: profiles } = await supabase.from('profiles').select('id,email,full_name,role');
+              if (profiles) profiles.forEach(pr => { if(pr.email) users[pr.id] = pr.email; });
+            } catch(e) {}
             setAllUsers(Object.entries(users).map(([id,email])=>({id,email})));
             // Convert flat Supabase customers to nested format with projects/builds
             const enriched = await Promise.all(custs.map(async c => {
@@ -3002,9 +3007,26 @@ export default function RemodelProApp({ user, profile, supabase, onSignOut }) {
         let filtered = viewAsUser==="unassigned"?customers.filter(c=>!c.created_by):viewAsUser?customers.filter(c=>c.created_by===viewAsUser):customers;
         if (search) { const s=search.toLowerCase(); filtered=filtered.filter(c=>(c.name||"").toLowerCase().includes(s)||(c.email||"").toLowerCase().includes(s)||(c.phone||"").includes(s)||(c.address||"").toLowerCase().includes(s)); }
         return <>
-          {filtered.map(c=><div key={c.id} className="cd" style={{cursor:"pointer"}} onClick={()=>{setACust(c.id);setSearch("")}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><div style={{fontWeight:600,fontSize:12}}>{c.name}</div><div style={{fontSize:9,color:"var(--t2)"}}>{c.email} {c.phone?"\u00b7 "+c.phone:""}{isAdmin&&<span style={{color:"var(--gd)",marginLeft:6}}>Rep: {c.created_by_email||"Unassigned"}</span>}</div></div>
-              <span className="tg tbl">{c.projects?c.projects.length:0} projects</span></div></div>)}
+          {filtered.map(c=>{
+            const repLabel = c.created_by_email || allUsers.find(u=>u.id===c.created_by)?.email || (c.created_by?"Unknown Rep":"Unassigned");
+            return <div key={c.id} className="cd" style={{cursor:"pointer"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}} onClick={()=>{setACust(c.id);setSearch("")}}>
+              <div><div style={{fontWeight:600,fontSize:12}}>{c.name}</div>
+                <div style={{fontSize:9,color:"var(--t2)"}}>{c.email} {c.phone?"\u00b7 "+c.phone:""}{isAdmin&&<span style={{color:"var(--gd)",marginLeft:6}}>Rep: {repLabel}</span>}</div></div>
+              <span className="tg tbl">{c.projects?c.projects.length:0} projects</span></div>
+            {isAdmin&&<div style={{display:"flex",alignItems:"center",gap:4,marginTop:4,paddingTop:4,borderTop:"1px solid var(--bd)"}} onClick={e=>e.stopPropagation()}>
+              <span style={{fontSize:9,color:"var(--t3)"}}>Assign:</span>
+              <select className="inp is" value={c.created_by||""} style={{flex:1,fontSize:10}} onChange={async(e)=>{
+                const newRepId = e.target.value;
+                const newRepEmail = newRepId ? (allUsers.find(u=>u.id===newRepId)?.email||"") : "";
+                updC(cs=>cs.map(cc=>cc.id!==c.id?cc:{...cc,created_by:newRepId||null,created_by_email:newRepEmail}));
+                if(supabase){try{await supabase.from('customers').update({created_by:newRepId||null,created_by_email:newRepEmail}).eq('id',c.id);flash("Rep updated for "+c.name)}catch(err){flash("Error updating rep","er")}}
+              }}>
+                <option value="">Unassigned</option>
+                {allUsers.map(u=><option key={u.id} value={u.id}>{u.email}</option>)}
+              </select>
+            </div>}
+          </div>})}
           {!filtered.length&&<div className="em"><I name="users" size={40}/><p>{search?"No customers match \""+search+"\"":viewAsUser?"No customers for this rep.":"Create a customer to start."}</p></div>}
         </>;
       })()}
