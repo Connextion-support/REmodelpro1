@@ -1684,6 +1684,7 @@ export default function RemodelProApp({ user, profile, supabase, onSignOut }) {
     const [openCat, setOpenCat] = useState(null);
     const [extSearch, setExtSearch] = useState("");
     const [browseSubKey, setBrowseSubKey] = useState(null);
+    const [browseFilters, setBrowseFilters] = useState({});
     const extTotal = items.reduce((s,x) => s + (x.price * (x.qty||1)) + (x.customAmt||0), 0);
     const cats = buildType ? getExtrasCatsForType(buildType) : ALL_EXTRAS_CATS;
 
@@ -1810,7 +1811,6 @@ export default function RemodelProApp({ user, profile, supabase, onSignOut }) {
         const catName = openCat.replace("_browse_","");
         const subs = PB_CATS[catName] || [];
         const browseSub = browseSubKey ? subs.find(s=>s.key===browseSubKey) : null;
-        const browseProds = browseSub ? allProducts.filter(p => browseSub.pfx.some(px => p.name.startsWith(px))).filter(p => !extSearch || p.name.toLowerCase().includes(extSearch.toLowerCase())) : [];
 
         return <div>
           <div style={{display:"flex",gap:4,alignItems:"center",marginBottom:6}}>
@@ -1821,19 +1821,60 @@ export default function RemodelProApp({ user, profile, supabase, onSignOut }) {
             <div style={{display:"flex",flexWrap:"wrap",gap:3}}>
               {subs.map(sub => {
                 const count = allProducts.filter(p => sub.pfx.some(px => p.name.startsWith(px))).length;
-                return <button key={sub.key} className="btn bs" onClick={()=>setBrowseSubKey(sub.key)} style={{fontSize:9}}>
+                return <button key={sub.key} className="btn bs" onClick={()=>{setBrowseSubKey(sub.key);setBrowseFilters({});setExtSearch("")}} style={{fontSize:9}}>
                   {sub.label} <span style={{color:"var(--t2)",marginLeft:2}}>({count})</span></button>;
               })}
             </div>
-          ) : (
-            <div>
+          ) : (()=>{
+            // Get all products for this subcategory
+            const allSubProds = allProducts.filter(p => browseSub.pfx.some(px => p.name.startsWith(px)));
+            // Filter out None/NA
+            const real = allSubProds.filter(p => {
+              const u = p.name.toUpperCase();
+              return !(u.includes("- NONE")||u.endsWith("NONE")||u.includes(", NONE")||u.includes("- NA,")||u.endsWith(", NA")||u.endsWith("- NA"));
+            });
+            // Cascading filters
+            const bf = browseFilters;
+            const f1Label = real.find(p=>p.f1l)?.f1l||"";
+            const f2Label = real.find(p=>p.f2l)?.f2l||"";
+            const f3Label = real.find(p=>p.f3l)?.f3l||"";
+            const f1Opts = f1Label ? [...new Set(real.filter(p=>p.f1v).map(p=>p.f1v))].sort() : [];
+            let after1 = real; if(bf.f1) after1 = real.filter(p=>p.f1v===bf.f1);
+            const f2Opts = f2Label ? [...new Set(after1.filter(p=>p.f2v).map(p=>p.f2v))].sort() : [];
+            let after2 = after1; if(bf.f2&&f2Label) after2 = after1.filter(p=>p.f2v===bf.f2);
+            const f3Opts = f3Label ? [...new Set(after2.filter(p=>p.f3v).map(p=>p.f3v))].sort() : [];
+            let filtered = after2; if(bf.f3&&f3Label) filtered = after2.filter(p=>p.f3v===bf.f3);
+            // Search
+            if(extSearch) filtered = filtered.filter(p=>p.name.toLowerCase().includes(extSearch.toLowerCase()));
+            const hasFilters = f1Label && f1Opts.length > 1;
+            const setBF = (field, val) => {
+              const next = {...bf, [field]:val};
+              if(field==="f1"){next.f2="";next.f3="";}
+              if(field==="f2"){next.f3="";}
+              setBrowseFilters(next);
+            };
+
+            return <div>
               <div style={{display:"flex",gap:4,alignItems:"center",marginBottom:4}}>
-                <button className="bg2" onClick={()=>setBrowseSubKey(null)}><I name="arrowL" size={10}/></button>
+                <button className="bg2" onClick={()=>{setBrowseSubKey(null);setBrowseFilters({})}}><I name="arrowL" size={10}/></button>
                 <span style={{fontSize:11,fontWeight:600}}>{browseSub?.label}</span>
+                <span style={{fontSize:9,color:"var(--t3)"}}>({filtered.length} of {real.length})</span>
               </div>
+              {hasFilters&&<div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:4}}>
+                {f1Label&&f1Opts.length>1&&<select className="inp is" style={{flex:1,minWidth:90,fontSize:11}} value={bf.f1||""} onChange={e=>setBF("f1",e.target.value)}>
+                  <option value="">All {f1Label}s ({f1Opts.length})</option>
+                  {f1Opts.map(o=><option key={o} value={o}>{o}</option>)}</select>}
+                {f2Label&&f2Opts.length>1&&<select className="inp is" style={{flex:1,minWidth:90,fontSize:11}} value={bf.f2||""} onChange={e=>setBF("f2",e.target.value)}>
+                  <option value="">All {f2Label}s ({f2Opts.length})</option>
+                  {f2Opts.map(o=><option key={o} value={o}>{o}</option>)}</select>}
+                {f3Label&&f3Opts.length>1&&<select className="inp is" style={{flex:1,minWidth:90,fontSize:11}} value={bf.f3||""} onChange={e=>setBF("f3",e.target.value)}>
+                  <option value="">All {f3Label}s ({f3Opts.length})</option>
+                  {f3Opts.map(o=><option key={o} value={o}>{o}</option>)}</select>}
+                {(bf.f1||bf.f2||bf.f3)&&<button className="bg2" style={{fontSize:9,color:"var(--a2)"}} onClick={()=>setBrowseFilters({})}>Clear</button>}
+              </div>}
               <input className="inp is" placeholder={"Search "+browseSub?.label+"..."} value={extSearch} onChange={e=>setExtSearch(e.target.value)} style={{marginBottom:4}}/>
               <div style={{maxHeight:200,overflowY:"auto"}}>
-                {browseProds.map(p => {
+                {filtered.map(p => {
                   const inList = items.some(x=>x.productId===p.id);
                   return <div key={p.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 0",borderBottom:"1px solid var(--bd)"}}>
                     <div style={{flex:1,minWidth:0}}><div style={{fontSize:10,fontWeight:500,wordBreak:"break-word"}}>{p.name}</div>
@@ -1845,10 +1886,10 @@ export default function RemodelProApp({ user, profile, supabase, onSignOut }) {
                     </div>
                   </div>;
                 })}
-                {browseProds.length===0&&<div style={{fontSize:10,color:"var(--t3)",padding:8,textAlign:"center"}}>No products match</div>}
+                {filtered.length===0&&<div style={{fontSize:10,color:"var(--t3)",padding:8,textAlign:"center"}}>No products match</div>}
               </div>
-            </div>
-          )}
+            </div>;
+          })()}
         </div>;
       })() : (
         <div>
