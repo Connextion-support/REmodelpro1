@@ -1683,6 +1683,7 @@ export default function RemodelProApp({ user, profile, supabase, onSignOut }) {
     const items = extras || [];
     const [openCat, setOpenCat] = useState(null);
     const [extSearch, setExtSearch] = useState("");
+    const [browseSubKey, setBrowseSubKey] = useState(null);
     const extTotal = items.reduce((s,x) => s + (x.price * (x.qty||1)) + (x.customAmt||0), 0);
     const cats = buildType ? getExtrasCatsForType(buildType) : ALL_EXTRAS_CATS;
 
@@ -1808,7 +1809,6 @@ export default function RemodelProApp({ user, profile, supabase, onSignOut }) {
       ) : openCat && openCat.startsWith("_browse_") ? (()=>{
         const catName = openCat.replace("_browse_","");
         const subs = PB_CATS[catName] || [];
-        const [browseSubKey, setBrowseSubKey] = useState(null);
         const browseSub = browseSubKey ? subs.find(s=>s.key===browseSubKey) : null;
         const browseProds = browseSub ? allProducts.filter(p => browseSub.pfx.some(px => p.name.startsWith(px))).filter(p => !extSearch || p.name.toLowerCase().includes(extSearch.toLowerCase())) : [];
 
