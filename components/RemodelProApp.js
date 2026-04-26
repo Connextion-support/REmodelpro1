@@ -1542,13 +1542,14 @@ export default function RemodelProApp({ user, profile, supabase, onSignOut }) {
           </tr>)}
           {/* Extras */}
           {b.extras&&b.extras.length>0&&<tr><td colSpan={6} style={{padding:"8px 6px 4px",fontSize:9,fontWeight:700,color:"#888",textTransform:"uppercase",letterSpacing:".06em",background:"#fafaf8"}}>Additional Work / Extras</td></tr>}
-          {(b.extras||[]).map(x=>{const prod=allProducts.find(p=>p.id===x.productId);return <tr key={x.id} style={{borderBottom:"1px solid #eee"}}>
+          {(b.extras||[]).map(x=>{const prod=allProducts.find(p=>p.id===x.productId);const lp=x.linkedProductId?allProducts.find(p=>p.id===x.linkedProductId):null;return <tr key={x.id} style={{borderBottom:"1px solid #eee"}}>
             <td style={{padding:"4px 6px",verticalAlign:"top"}}>
               <div style={{fontWeight:600}}>{x.name}</div>
+              {lp&&<div style={{fontSize:9,color:"#2a6bcc",fontWeight:500}}>→ {lp.name}</div>}
               {x.note&&<div style={{fontSize:8,color:"#c55",fontStyle:"italic"}}>Note: {x.note}</div>}
             </td>
-            <td style={{padding:"4px 6px",fontSize:9,color:"#666"}}>{prod?(prod.sku||"-"):"-"}</td>
-            <td style={{padding:"4px 6px",fontSize:9,color:"#666"}}>{prod?(prod.supplier||"-"):"-"}</td>
+            <td style={{padding:"4px 6px",fontSize:9,color:"#666"}}>{lp?(lp.sku||"-"):prod?(prod.sku||"-"):"-"}</td>
+            <td style={{padding:"4px 6px",fontSize:9,color:"#666"}}>{lp?(lp.supplier||lp.sup||"-"):prod?(prod.supplier||"-"):"-"}</td>
             <td style={{padding:"4px 6px",textAlign:"center"}}>{x.qty||1}</td>
             <td style={{padding:"4px 6px",textAlign:"right",fontVariantNumeric:"tabular-nums"}}>{fmt(x.price)}</td>
             <td style={{padding:"4px 6px",textAlign:"right",fontWeight:600,fontVariantNumeric:"tabular-nums"}}>{fmt((x.price*(x.qty||1))+(x.customAmt||0))}</td>
@@ -2925,10 +2926,11 @@ export default function RemodelProApp({ user, profile, supabase, onSignOut }) {
           {/* Extras */}
           {b.extras&&b.extras.length>0&&<>
             <div style={{fontSize:10,fontWeight:600,color:"#888",marginTop:6,marginBottom:2}}>Additional Work</div>
-            {b.extras.map(x=><div key={x.id} style={{padding:"3px 0",borderBottom:"1px solid #f0f0f0"}}>
+            {b.extras.map(x=>{const lp=x.linkedProductId?allProducts.find(p=>p.id===x.linkedProductId):null;return <div key={x.id} style={{padding:"3px 0",borderBottom:"1px solid #f0f0f0"}}>
               <div className="ln"><span>{x.name} x {x.qty||1}</span></div>
+              {lp&&<div style={{fontSize:9,color:"#2a6bcc",paddingLeft:8}}>→ {lp.name}</div>}
               {x.note&&<div style={{fontSize:9,color:"#888",fontStyle:"italic",paddingLeft:8}}>Note: {x.note}</div>}
-            </div>)}
+            </div>})}
           </>}
           <div style={{display:"flex",justifyContent:"space-between",fontWeight:700,borderTop:"1px solid #e0e0e0",paddingTop:4,marginTop:2}}><span>{b.name} (Retail)</span><span>{fmt(bSub(b))}</span></div></div>})}
         {pDiscTotal(cur.p)>0&&<div style={{padding:"6px 0"}}>
@@ -3268,13 +3270,14 @@ export default function RemodelProApp({ user, profile, supabase, onSignOut }) {
                     <td style={{padding:"4px",textAlign:"center"}}>{l.qty}</td>
                   </tr>)}
                   {b.extras&&b.extras.length>0&&<tr><td colSpan={2} style={{padding:"6px 4px 2px",fontSize:9,fontWeight:700,color:"#888",textTransform:"uppercase",letterSpacing:".05em"}}>Additional Work / Extras</td></tr>}
-                  {b.extras&&b.extras.map(x=><tr key={x.id} style={{borderBottom:"1px solid #f0f0f0"}}>
+                  {b.extras&&b.extras.map(x=>{const lp=x.linkedProductId?allProducts.find(p=>p.id===x.linkedProductId):null;return <tr key={x.id} style={{borderBottom:"1px solid #f0f0f0"}}>
                     <td style={{padding:"4px",verticalAlign:"top"}}>
                       <div style={{fontWeight:500}}>{x.name}</div>
+                      {lp&&<div style={{fontSize:9,color:"#2a6bcc",fontWeight:500}}>→ {lp.name}</div>}
                       {x.note&&<div style={{fontSize:9,color:"#888",fontStyle:"italic",marginTop:1}}>Note: {x.note}</div>}
                     </td>
                     <td style={{padding:"4px",textAlign:"center"}}>{x.qty||1}</td>
-                  </tr>)}
+                  </tr>})}
                 </tbody>
               </table>
             </div>}
