@@ -1739,7 +1739,7 @@ export default function RemodelProApp({ user, profile, supabase, onSignOut }) {
         </div>;})}
       </div>}
 
-      {/* Category browser */}
+      {/* Category browser for extras */}
       <div style={{fontSize:9,fontWeight:600,color:"var(--t3)",textTransform:"uppercase",letterSpacing:".06em",marginBottom:4}}>Add Extras</div>
       {!openCat ? (
         <div style={{display:"flex",flexWrap:"wrap",gap:3}}>
@@ -1748,8 +1748,61 @@ export default function RemodelProApp({ user, profile, supabase, onSignOut }) {
             return <button key={c.key} className="btn bs" onClick={()=>{setOpenCat(c.key);setExtSearch("")}} style={{fontSize:9}}>
               {c.label} <span style={{color:"var(--t2)",marginLeft:2}}>({count})</span></button>;
           })}
+          {/* Browse full category catalog */}
+          {(()=>{
+            const catName = buildType && (buildType.includes("Bathroom")||buildType.includes("Wet")||buildType==="Half Bath") ? "Bathroom" : buildType && buildType.includes("Kitchen") ? "Kitchen" : null;
+            if (!catName) return null;
+            const subs = PB_CATS[catName] || [];
+            return <button className="btn bs" onClick={()=>{setOpenCat("_browse_"+catName);setExtSearch("")}} style={{fontSize:9,borderColor:"var(--a2)",color:"var(--a2)"}}>
+              Browse {catName} Products <span style={{color:"var(--t2)",marginLeft:2}}>({subs.length} categories)</span></button>;
+          })()}
         </div>
-      ) : (
+      ) : openCat && openCat.startsWith("_browse_") ? (()=>{
+        const catName = openCat.replace("_browse_","");
+        const subs = PB_CATS[catName] || [];
+        const [browseSubKey, setBrowseSubKey] = useState(null);
+        const browseSub = browseSubKey ? subs.find(s=>s.key===browseSubKey) : null;
+        const browseProds = browseSub ? allProducts.filter(p => browseSub.pfx.some(px => p.name.startsWith(px))).filter(p => !extSearch || p.name.toLowerCase().includes(extSearch.toLowerCase())) : [];
+
+        return <div>
+          <div style={{display:"flex",gap:4,alignItems:"center",marginBottom:6}}>
+            <button className="btn bs" onClick={()=>{setOpenCat(null);setBrowseSubKey(null)}}><I name="arrowL" size={10}/> Back</button>
+            <span style={{fontSize:11,fontWeight:600,color:"var(--a2)"}}>Browse {catName} Products</span>
+          </div>
+          {!browseSubKey ? (
+            <div style={{display:"flex",flexWrap:"wrap",gap:3}}>
+              {subs.map(sub => {
+                const count = allProducts.filter(p => sub.pfx.some(px => p.name.startsWith(px))).length;
+                return <button key={sub.key} className="btn bs" onClick={()=>setBrowseSubKey(sub.key)} style={{fontSize:9}}>
+                  {sub.label} <span style={{color:"var(--t2)",marginLeft:2}}>({count})</span></button>;
+              })}
+            </div>
+          ) : (
+            <div>
+              <div style={{display:"flex",gap:4,alignItems:"center",marginBottom:4}}>
+                <button className="bg2" onClick={()=>setBrowseSubKey(null)}><I name="arrowL" size={10}/></button>
+                <span style={{fontSize:11,fontWeight:600}}>{browseSub?.label}</span>
+              </div>
+              <input className="inp is" placeholder={"Search "+browseSub?.label+"..."} value={extSearch} onChange={e=>setExtSearch(e.target.value)} style={{marginBottom:4}}/>
+              <div style={{maxHeight:200,overflowY:"auto"}}>
+                {browseProds.map(p => {
+                  const inList = items.some(x=>x.productId===p.id);
+                  return <div key={p.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 0",borderBottom:"1px solid var(--bd)"}}>
+                    <div style={{flex:1,minWidth:0}}><div style={{fontSize:10,fontWeight:500,wordBreak:"break-word"}}>{p.name}</div>
+                      {p.desc&&<div style={{fontSize:8,color:"var(--t3)"}}>{p.desc.substring(0,60)}</div>}</div>
+                    <div style={{display:"flex",alignItems:"center",gap:4}}>
+                      <span className="nm" style={{fontSize:10,color:"var(--t2)"}}>{p.price>0?fmt(p.price):"Incl."}</span>
+                      <button className={"btn bs "+(inList?"bo":"bp")} onClick={()=>addExtra(p)} style={{fontSize:9}}>
+                        {inList?<><I name="check" size={9}/> Added</>:<><I name="plus" size={9}/> Add</>}</button>
+                    </div>
+                  </div>;
+                })}
+                {browseProds.length===0&&<div style={{fontSize:10,color:"var(--t3)",padding:8,textAlign:"center"}}>No products match</div>}
+              </div>
+            </div>
+          )}
+        </div>;
+      })() : (
         <div>
           <div style={{display:"flex",gap:4,alignItems:"center",marginBottom:6}}>
             <button className="btn bs" onClick={()=>setOpenCat(null)}><I name="arrowL" size={10}/> Back</button>
