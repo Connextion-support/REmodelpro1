@@ -1941,7 +1941,7 @@ export default function RemodelProApp({ user, profile, supabase, onSignOut }) {
     const isBath=bt.includes("Bathroom"), isWet=bt.includes("Wet"), isKit=bt.includes("Kitchen"), isRoof=bt.includes("Roofing"), isHalf=bt==="Half Bath";
 
     if(isCfg){
-      const ok = isHalf ? true : isKit ? !!wizConfig.sinkBase : isRoof ? !!wizConfig.roofSize : (!!wizConfig.brand && !!wizConfig.size && (isWet || !!wizConfig.vanityType));
+      const ok = isHalf ? true : isKit ? !!wizConfig.sinkBase : isRoof ? true : (!!wizConfig.brand && !!wizConfig.size && (isWet || !!wizConfig.vanityType));
       return (<>
         <div className="tb"><div style={{display:"flex",alignItems:"center",gap:7}}>
           <button className="bg2" onClick={()=>{setView("projects");setABuild(null)}}><I name="arrowL" size={15}/></button>
@@ -1961,8 +1961,9 @@ export default function RemodelProApp({ user, profile, supabase, onSignOut }) {
           </>)}
           {isKit && (<><div className="ig"><label>Sink Base Size</label></div>
             <div className="cg">{KIT_SIZES.map(sz => <div key={sz} className={"co"+(wizConfig.sinkBase===sz?" sel":"")} onClick={()=>setWizConfig({...wizConfig,sinkBase:sz})}>{sz}</div>)}</div></>)}
-          {isRoof && (<><div className="ig"><label>Roof Size</label></div>
-            <div className="cg">{ROOF_SIZES.map(sz => <div key={sz} className={"co"+(wizConfig.roofSize===sz?" sel":"")} onClick={()=>setWizConfig({...wizConfig,roofSize:sz})}>{sz}</div>)}</div></>)}
+          {isRoof && (<><div className="cd" style={{background:"linear-gradient(135deg,rgba(45,212,160,.06),rgba(59,109,240,.04))",border:"1px solid rgba(45,212,160,.15)",marginTop:8}}>
+            <div style={{fontSize:13,fontWeight:700,marginBottom:4}}>New Roof Build</div>
+            <div style={{fontSize:11,color:"var(--t2)"}}>No additional configuration needed — click Start to begin selecting roof package, upgrades, and extras.</div></div></>)}
           {ok && <div className="cd" style={{background:"var(--ci)",marginTop:12}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
               <div><div style={{fontSize:10,color:"var(--t2)",fontWeight:600,textTransform:"uppercase",letterSpacing:".06em"}}>Base Package Price</div>
