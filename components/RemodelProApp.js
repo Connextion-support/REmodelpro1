@@ -614,7 +614,7 @@ export default function RemodelProApp({ user, profile, supabase, onSignOut }) {
               const { data: projs } = await supabase.from('projects').select('*').eq('customer_id', c.id);
               const projects = await Promise.all((projs||[]).map(async p => {
                 const { data: blds } = await supabase.from('builds').select('*').eq('project_id', p.id);
-                return { ...p, orderedAt: p.ordered_at||"", jobDate: p.job_date||"", locked: p.locked||false, result: p.result||"", resultDate: p.result_date||"", noDemoReason: p.no_demo_reason||"", laborCost: p.labor_cost||0, builds: (blds||[]).map(b => ({...b, payTerms: b.pay_terms, payType: b.pay_terms?.payType||"", finType: b.pay_terms?.finType||"", wizConfig: b.wiz_config, wizStep: b.wiz_config?.wizStep, wizSelections: b.wiz_selections})) };
+                return { ...p, discounts: p.discounts||[], orderedAt: p.ordered_at||"", jobDate: p.job_date||"", locked: p.locked||false, result: p.result||"", resultDate: p.result_date||"", noDemoReason: p.no_demo_reason||"", laborCost: p.labor_cost||0, builds: (blds||[]).map(b => ({...b, payTerms: b.pay_terms, payType: b.pay_terms?.payType||"", finType: b.pay_terms?.finType||"", wizConfig: b.wiz_config, wizStep: b.wiz_config?.wizStep, wizSelections: b.wiz_selections})) };
               }));
               return { ...c, projects };
             }));
@@ -1412,6 +1412,19 @@ export default function RemodelProApp({ user, profile, supabase, onSignOut }) {
           materials_and_products: JSON.stringify(allMats),
           materials_by_supplier: JSON.stringify(materialsBySupplier),
           products_by_supplier: JSON.stringify(productsBySupplier),
+          // Flat text format for GHL/GPT parsing
+          materials_text: materials.map(m => m.name + " | Qty: " + m.quantity + " | " + m.supplier + (m.work_note ? " | Note: " + m.work_note : "")).join("\n"),
+          products_text: products.map(m => m.name + " | Qty: " + m.quantity + " | " + m.supplier + (m.work_note ? " | Note: " + m.work_note : "")).join("\n"),
+          all_items_text: allMats.map(m => m.name + " | Qty: " + m.quantity + " | $" + m.unit_price + " | " + m.supplier + (m.work_note ? " | Note: " + m.work_note : "")).join("\n"),
+          // Per-supplier flat fields
+          ...Object.fromEntries(Object.keys({...materialsBySupplier,...productsBySupplier}).sort().flatMap(sup => {
+            const supKey = sup.toLowerCase().replace(/[^a-z0-9]/g,"_");
+            const supItems = [...(materialsBySupplier[sup]||[]),...(productsBySupplier[sup]||[])];
+            return [
+              ["supplier_"+supKey+"_items", supItems.map(m => m.name + " | Qty: " + m.quantity + (m.work_note ? " | Note: " + m.work_note : "")).join("\n")],
+              ["supplier_"+supKey+"_count", supItems.length],
+            ];
+          })),
           supplier_summary: JSON.stringify(Object.keys({...materialsBySupplier,...productsBySupplier}).sort().map(sup => ({
             supplier: sup,
             materials: (materialsBySupplier[sup]||[]).length,
@@ -3115,6 +3128,17 @@ export default function RemodelProApp({ user, profile, supabase, onSignOut }) {
           {!cur.p.locked&&<div style={{marginTop:8}}><ExtrasPanel extras={b.extras} buildType={b.type} onUpdate={newE=>{
             updC(cs=>cs.map(c=>c.id!==aCust?c:{...c,projects:c.projects.map(p=>p.id!==aProj?p:{...p,builds:p.builds.map(bb=>bb.id!==b.id?bb:{...bb,extras:newE})})}));
           }}/></div>}
+          {/* Show extras as read-only when locked */}
+          {cur.p.locked&&b.extras&&b.extras.length>0&&<div className="cd" style={{marginTop:8}}>
+            <div style={{fontSize:9,fontWeight:600,color:"var(--t3)",textTransform:"uppercase",letterSpacing:".06em",marginBottom:4}}>Extras / Add-Ons ({b.extras.length})</div>
+            {b.extras.map(x=>{const lp=x.linkedProductId?allProducts.find(p=>p.id===x.linkedProductId):null;return <div key={x.id} style={{padding:"4px 0",borderBottom:"1px solid var(--bd)",fontSize:10}}>
+              <div style={{display:"flex",justifyContent:"space-between"}}>
+                <div style={{fontWeight:600}}>{x.name}{lp&&<span style={{color:"var(--a2)",marginLeft:4}}>→ {lp.name}</span>}</div>
+                <div className="nm" style={{fontWeight:600,color:"var(--wn)"}}>{fmt((x.price||0)*(x.qty||1)+(x.customAmt||0))}</div>
+              </div>
+              {x.note&&<div style={{fontSize:9,color:"var(--t2)",fontStyle:"italic"}}>Note: {x.note}</div>}
+            </div>;})}
+          </div>}
           {/* Per-build payment type & financing */}
           <div className="cd" style={{marginTop:8,border:"1px solid rgba(59,109,240,.15)",background:"rgba(59,109,240,.03)"}}>
             <div className="cd-t" style={{color:"var(--a2)",marginBottom:6}}>Payment & Financing — {b.name}</div>
@@ -3177,6 +3201,18 @@ export default function RemodelProApp({ user, profile, supabase, onSignOut }) {
           <DiscountPanel discounts={cur.p.discounts} subtotal={pRetail(cur.p)} level="Project" onUpdate={newD=>{
             updC(cs=>cs.map(c=>c.id!==aCust?c:{...c,projects:c.projects.map(p=>p.id!==aProj?p:{...p,discounts:newD})}));
           }}/>
+        </div>}
+        {/* Show discounts as read-only when locked */}
+        {cur.p.locked&&cur.p.discounts&&cur.p.discounts.length>0&&<div className="cd" style={{marginTop:12,border:"1px solid rgba(45,212,160,.2)",background:"rgba(45,212,160,.04)"}}>
+          <div className="cd-t" style={{color:"var(--ok)",marginBottom:6}}>Project Discounts (Locked)</div>
+          {calcDiscountBreakdown(cur.p.discounts, pRetail(cur.p)).map((d,i)=><div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:11,padding:"3px 0",borderBottom:"1px solid var(--bd)"}}>
+            <span>{d.name} {d.count>1?"x"+d.count:""} <span style={{color:"var(--t3)"}}>{d.type==="percent"?d.amount+"%":"$"+d.amount}</span></span>
+            <span style={{color:"var(--ok)",fontWeight:600}} className="nm">-{fmt(d.savedAmt)}</span>
+          </div>)}
+          <div style={{display:"flex",justifyContent:"space-between",fontWeight:700,fontSize:12,marginTop:6,paddingTop:6,borderTop:"1px solid var(--bd)"}}>
+            <span>Total Discounts</span>
+            <span style={{color:"var(--ok)"}} className="nm">-{fmt(pDiscTotal(cur.p))}</span>
+          </div>
         </div>}
 
         {/* Combined Payment Summary */}
